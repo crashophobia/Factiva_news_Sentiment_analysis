@@ -1,0 +1,448 @@
+#####################################################################
+#								  			SENTIMENT ANALYSIS													#
+#####################################################################
+rm(list=ls())
+#set work directory
+setwd("C:/Users/Utilizador/Desktop/Thesis/Code")
+
+#Need help?
+#https://cran.r-project.org/web/views/NaturalLanguageProcessing.html
+
+#####################################################################
+#									    			PREPARATION		    											#
+#####################################################################
+
+##------------------ Loughran-McDonald dictionary -------------------
+#DICTIONARY
+library(readr)
+library(readxl)
+
+#From: https://sraf.nd.edu/textual-analysis/
+
+#Read the 2018 Loughran-McDonald Master Dictionary (Updated: March 2019)
+#The master dictionary provides a means of determining which tokens are actual words (important for consistency in word counts).
+MasterDictionary_LM <- read_xlsx("/Users/Utilizador/Desktop/Thesis/Code/LoughranMcDonald_MasterDictionary_2018.xlsx", col_names = TRUE)
+MasterDictionary_LM[1] <- lapply(MasterDictionary_LM[1], tolower) #transform to lower case
+
+master_dictionary <- (lapply(MasterDictionary_LM[1], as.character)) #list of words to be considered
+
+#list of words to be excluded (Merged_Part1 is Generic, Auditor, Currencies, Geographic, Dates and Numbers)
+StopWords_Merged_Part1 <- lapply(read.table("C:/Users/Utilizador/Desktop/Thesis/Code/StopWords_Merged_Part1.txt", quote="\"", comment.char=""), tolower)
+StopWords_Merged_Part1 <- unlist(lapply(StopWords_Merged_Part1, as.character)) 
+
+#Merged_Part2 & Part3 is the Names list
+#StopWords_Merged_Part2 <- lapply(read.table("C:/Users/Utilizador/Desktop/Thesis/Code/StopWords_Merged_Part2.txt", quote="\"", comment.char=""), tolower)
+#StopWords_Merged_Part2 <- unlist(lapply(StopWords_Merged_Part2, as.character)) 
+
+#StopWords_Merged_Part3 <- lapply(read.table("C:/Users/Utilizador/Desktop/Thesis/Code/StopWords_Merged_Part3.txt", quote="\"", comment.char=""), tolower)
+#StopWords_Merged_Part3 <- unlist(lapply(StopWords_Merged_Part3, as.character)) 
+
+#https://sraf.nd.edu/textual-analysis/resources/
+
+#Read the Loughran-McDonald finance-specific dictionary
+#From: https://sraf.nd.edu/textual-analysis/
+library(tokenizers)
+
+negative_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Negative", col_names = FALSE), tolower)
+negative_words <- tokenize(negative_words[["...1"]])
+
+positive_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Positive", col_names = FALSE), tolower)
+positive_words <- tokenize(positive_words[["...1"]])
+
+uncertainty_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Uncertainty", col_names = FALSE), tolower)
+uncertainty_words <- tokenize(uncertainty_words[["...1"]])
+
+litigious_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Litigious", col_names = FALSE), tolower)
+litigious_words <- tokenize(litigious_words[["...1"]])
+
+strongmodal_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "StrongModal", col_names = FALSE), tolower)
+strongmodal_words <- tokenize(strongmodal_words[["...1"]])
+
+weakmodal_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "WeakModal", col_names = FALSE), tolower)
+weakmodal_words <- tokenize(weakmodal_words[["...1"]])
+
+constraining_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Constraining", col_names = FALSE), tolower)
+constraining_words <- tokenize(constraining_words[["...1"]])
+
+##--------------------------- create corpus ---------------------------
+
+library(tm) #text-mining
+library(R.temis) #Integrated Text Mining Solution
+library(tm.plugin.factiva)
+
+#GET THE DATA
+#Note: I'm using test data - 100 most recent apple news (collection date: 17/04/2020)
+source <- FactivaSource('aapl sample.html', encoding = "UTF-8",format="HTML")
+raw_corpus <- Corpus(source, readerControl = list(language="en")) 
+
+#Check how many documents there is in this file
+length(as.list(raw_corpus))
+
+##The VCorpus object is a nested list, or list of lists, so to review the 
+#actual text you index the list twice. [1] - content [2] - metadata
+
+# Read first article
+raw_corpus[[1]][1] #type==list
+#or raw_corpus[[1]][["content"]] #or content(raw_corpus[[1]]) (type==character)
+
+# See meta-data associated with first article
+raw_corpus[[1]][2] #type==list
+#or raw_corpus[[1]][["meta"]] #or meta(raw_corpus[[1]]) (type==character) 
+
+##-------------------------- clean the corpus -------------------------
+#CLEAN THE DATA
+library(qdap)
+library(stringi)
+
+#Removing URLs (tranforming it to a space)
+removeURL <- content_transformer(function(x) gsub("(f|ht)tp(s?)://\\S+", " ", x, perl=T))
+corpus <- tm_map(raw_corpus, removeURL)
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+corpus <- tm_map(corpus, toSpace, "/")
+corpus <- tm_map(corpus, toSpace, "@")
+corpus <- tm_map(corpus, toSpace, "\\|")
+corpus <- tm_map(corpus, toSpace, "-") #splits hyphenated words
+
+#For some reason, when I close the script the - changes along with the '
+#Copy hypen and ' from line 167, paste it below (lines 109 and 110) and re-run the cleaning (from line 98)
+
+#corpus <- tm_map(corpus, toSpace, "-") #splits hyphenated words (different hyphen)
+#corpus <- tm_map(corpus, toSpace, "'") #"'"
+
+#convert to lower case
+corpus <- tm_map(corpus, content_transformer(function(x) stri_trans_tolower(x)))
+
+# remove basic english stopwords
+corpus <- tm_map(corpus, removeWords, stopwords("en")) 
+
+#Remove pontuation, numbers, LM stopwords and extra white spaces
+skipWords <- function(x) removeWords(x, StopWords_Merged_Part1) #c(StopWords, "insert other words if needed")
+
+funs <- list(stripWhitespace,
+             skipWords,
+             removeNumbers,
+             removePunctuation)
+
+#tm_reduce - Fold multiple transformations (mappings) into a single one, from right to left.
+clean_corpus <- tm_map(corpus, FUN = tm_reduce, tmFuns = funs)
+
+#save for later use
+#save(clean_corpus, file="clean_corpus.rda")
+
+##------------------------ inspecting clean_corpus ------------------------
+
+dictionary <- tokenize(master_dictionary[["Word"]])
+#construct document term matrix (no term weighting)
+dtm <- build_dtm(clean_corpus, sparsity = 1, dictionary = dictionary,
+                 remove_stopwords = FALSE, tolower = FALSE,
+                 remove_punctuation = FALSE, remove_numbers = FALSE, min_length = 2)
+
+#test <- frequent_terms(dtm,variable=dtm[["dimnames"]][["Docs"]],n=200)
+#test
+#test2 <- lexical_summary(dtm,clean_corpus)
+#specific_terms(dtm)
+
+all_tokens <- findFreqTerms(dtm, 1) #list of all tokens
+
+#Given that not all words are a part of the master dict., how many words were left out?
+whole_dtm <- build_dtm(clean_corpus, sparsity = 1, dictionary = NULL,
+                       remove_stopwords = FALSE, tolower = FALSE,
+                       remove_punctuation = FALSE, remove_numbers = FALSE, min_length = 2)
+whole_all_tokens <- findFreqTerms(whole_dtm, 1)
+all_matches <- charmatch(whole_all_tokens,dictionary)
+
+no_matches <- 0 
+matches <- 0
+for (i in 1:(length(whole_all_tokens))){
+  if (is.na(all_matches[i])==TRUE) {
+    no_matches[i] <- whole_all_tokens[i]
+  } else {
+    matches[i] <- 'Match'
+  }
+} 
+summary(matches %in% 'Match') #1179 terms were exluded
+
+no_matches <- na.exclude(no_matches)
+View(no_matches)
+
+#Exclude non words from clean_corpus
+mycorpus <- tm_map(clean_corpus, removeWords, no_matches)
+
+##------------------- Check if all tokens on mycorpus are words ------------------
+#construct document term matrix (no term weighting)
+dtm2 <- build_dtm(mycorpus, sparsity = 1, dictionary = dictionary,
+                 remove_stopwords = FALSE, tolower = FALSE,
+                 remove_punctuation = FALSE, remove_numbers = FALSE, min_length = 2)
+
+all_tokens2 <- findFreqTerms(dtm2, 1) #list of all tokens
+
+#Given that not all words are a part of the master dict., how many words were left out?
+whole_dtm2 <- build_dtm(mycorpus, sparsity = 1, dictionary = NULL,
+                       remove_stopwords = FALSE, tolower = FALSE,
+                       remove_punctuation = FALSE, remove_numbers = FALSE, min_length = 2)
+whole_all_tokens2 <- findFreqTerms(whole_dtm2, 1)
+all_matches2 <- charmatch(whole_all_tokens2,dictionary)
+
+no_matches2 <- 0 
+matches2 <- 0
+for (i in 1:(length(whole_all_tokens2))){
+  if (is.na(all_matches2[i])==TRUE) {
+    no_matches2[i] <- whole_all_tokens2[i]
+  } else {
+    matches2[i] <- 'Match'
+  }
+} 
+summary(matches2 %in% 'Match') #no terms were exluded
+no_matches2 #this should be 0
+
+##-------------------- Divide the corpus by date ------------------
+library(purrr)
+library(dplyr)
+library(tidytext)
+library(tidyr)
+
+#Tidy a Corpus object from the tm package: Returns a data frame with one-row-per-document, 
+#with a text column containing the document's text, and one column for each local (per-document) metadata tag.
+tidy_corpus <- tidy(mycorpus, collapse = " ") 
+
+#Tokenize my tidy_corpus
+mytokens <- tidy_corpus %>%
+  unnest_tokens(word, text)
+
+"Apple Inc." %in% (tidy_corpus$company[[5]])
+
+#Create groups by date
+groups <- (mytokens %>% group_by(datetimestamp))
+
+View(group_keys(groups)) #Check the grouping structure
+
+#Split data by day
+mytokens_grouped <- group_split(groups)
+
+##---------------------inspect frequent terms--------------------
+
+# most common words
+mytokens %>%
+  count(word, sort = TRUE)
+
+#Let's use tf-idf to determine which words were most specific to each document
+mytokens %>%
+  count(id, word) %>%
+  bind_tf_idf(word, id, n) %>%
+  arrange(desc(tf_idf))
+
+##--------------------- Term weighting --------------------
+
+# tf-idf (from tidytext, see formula here:https://rdrr.io/cran/tidytext/src/R/bind_tf_idf.R)
+#mytokens_weights <- mytokens %>% count(datetimestamp, id, word) %>% bind_tf_idf(word, id, n)
+
+#Loughran-McDonald - tf-idf with a modification that adjusts for document length
+mybind_tf_idf <- function(tbl, term, document, n) {
+  term <- quo_name(enquo(term))
+  document <- quo_name(enquo(document))
+  n_col <- quo_name(enquo(n))
+  
+  terms <- as.character(tbl[[term]])
+  documents <- as.character(tbl[[document]])
+  n <- tbl[[n_col]]
+  doc_totals <- tapply(n, documents, sum)
+  idf <- log(length(doc_totals) / table(terms))
+  
+  tbl$tf <- (1+log(n))
+  tbl$idf <- as.numeric(idf[terms])
+  tbl$tf_idf <- tbl$tf * tbl$idf
+  tbl$tf_idf_LM <- ((1+log(n))/(1+log(as.numeric(doc_totals[documents])))) * tbl$idf
+  
+  if(any(tbl$idf < 0, na.rm = TRUE)) {
+    rlang::warn(paste("A value for tf_idf is negative:\n",
+                      "Input should have exactly one row per document-term combination."))
+  }
+  tbl
+}
+
+mytokens_weights <- mytokens %>% count(datetimestamp, id, word) %>% mybind_tf_idf(word, id, n)
+
+#Let's look at the words with higher tf_idf_LM
+mytokens_weights %>% arrange(desc(tf_idf_LM))
+
+table(mytokens_weights$n<1) #verify if any of the n is lower than 1 
+
+
+###################################################################
+#					  	        	SENTIMENT	ANALYSIS   	    			  				#
+###################################################################
+
+#Creating sentiment dummies 
+negative <- 0
+positive <- 0
+uncertainty <- 0
+litigious <- 0
+strongmodal <- 0
+weakmodal <- 0
+constraining <- 0
+
+for (i in (1:length(mytokens_weights[["word"]]))){
+  negative[i] <- 0
+  positive[i] <- 0
+  uncertainty[i] <- 0
+  litigious[i] <- 0
+  strongmodal[i] <- 0
+  weakmodal[i] <- 0
+  constraining[i] <- 0
+  if (is.na(charmatch(mytokens_weights[["word"]][i], negative_words)) == FALSE){
+    negative[i] <- negative[i] + 1
+    } else if (is.na(charmatch(mytokens_weights[["word"]][i], positive_words)) == FALSE){
+      positive[i] <- positive[i] + 1
+      } else if (is.na(charmatch(mytokens_weights[["word"]][i], uncertainty_words)) == FALSE){
+        uncertainty[i] <- uncertainty[i] + 1
+        } else if (is.na(charmatch(mytokens_weights[["word"]][i], litigious_words)) == FALSE){
+          litigious[i] <- litigious[i] + 1
+          } else if (is.na(charmatch(mytokens_weights[["word"]][i], strongmodal_words)) == FALSE){
+            strongmodal[i] <- strongmodal[i] + 1
+            } else if (is.na(charmatch(mytokens_weights[["word"]][i], weakmodal_words)) == FALSE){
+              weakmodal[i] <- weakmodal[i] + 1
+              } else if (is.na(charmatch(mytokens_weights[["word"]][i], constraining_words)) == FALSE){
+                constraining[i] <- constraining[i] + 1
+              } else {next}
+}
+
+library(tibble)
+mytokens_weights <- mytokens_weights %>% add_column(tibble(negative),tibble(positive), tibble(uncertainty), tibble(litigious),tibble(strongmodal),tibble(weakmodal),tibble(constraining))
+
+#Create groups by date
+groups2 <- (mytokens_weights %>% group_by(datetimestamp))
+
+View(group_keys(groups2)) #Check the grouping structure
+
+#Split data by day
+mytokens_grouped_weights <- group_split(groups2)
+
+#Compute a sentiment score per day
+neg_score <- 0
+pos_score <- 0
+sentiment_score <- 0 #(pos-neg)/(pos+neg)
+sentiment_score2 <- 0 #(pos-neg)/total words in that day
+for (i in 1:length(mytokens_grouped_weights)){
+  neg_score[i] <- sum(mytokens_grouped_weights[[i]][["tibble(negative)"]][["negative"]])
+  pos_score[i] <- sum(mytokens_grouped_weights[[i]][["tibble(positive)"]][["positive"]])
+  sentiment_score[i] = (pos_score[i] - neg_score[i]) / (pos_score[i] + neg_score[i])
+  sentiment_score2[i] = ((pos_score[i] - neg_score[i])/sum(mytokens_grouped_weights[[i]][["n"]]))
+}
+
+day_score <- mytokens_weights %>% 
+  select(datetimestamp) %>% distinct() %>% 
+  add_column(tibble(sentiment_score),tibble(sentiment_score2))
+
+View(day_score)
+#Note: the sentiment score is always negative (which given that the length(negative_words) > length(positive_words) isn't surprising)
+#Is that a problem somehow?
+
+# View summary statistics of sentiment variable
+summary(sentiment_score)
+
+# Visualize distribution of standardized sentiment variable
+hist(scale(sentiment_score))
+
+
+#Create groups by article
+groups_byarticle <- (mytokens_weights %>% group_by(id))
+
+View(group_keys(groups_byarticle)) #Check the grouping structure
+
+#Split data by day
+mytokens_byarticle_weights <- group_split(groups_byarticle)
+
+#Compute a sentiment score per article
+neg_score_byarticle <- 0
+pos_score_byarticle <- 0
+sentiment_score_byarticle <- 0 #(pos-neg)/(pos+neg)
+sentiment_score2_byarticle <- 0 #(pos-neg)/total words in that article
+for (i in 1:length(mytokens_byarticle_weights)){
+  neg_score_byarticle[i] <- sum(mytokens_byarticle_weights[[i]][["tibble(negative)"]][["negative"]])
+  pos_score_byarticle[i] <- sum(mytokens_byarticle_weights[[i]][["tibble(positive)"]][["positive"]])
+  sentiment_score_byarticle[i] = (pos_score_byarticle[i] - neg_score_byarticle[i]) / (pos_score_byarticle[i] + neg_score_byarticle[i])
+  sentiment_score2_byarticle[i] = ((pos_score_byarticle[i] - neg_score_byarticle[i])/sum(mytokens_byarticle_weights[[i]][["n"]]))
+}
+
+View(sentiment_score_byarticle)
+
+#Create average per day
+day_score2 <- mytokens_weights %>% 
+  select(datetimestamp,id) %>% distinct() %>% 
+  add_column(tibble(sentiment_score_byarticle),tibble(sentiment_score2_byarticle)) %>% 
+  group_by(datetimestamp) %>%  
+  summarise(mean1 = mean(`tibble(sentiment_score_byarticle)`$sentiment_score_byarticle), mean2 = mean(`tibble(sentiment_score2_byarticle)`$sentiment_score2_byarticle))
+
+View(day_score2)
+
+#Compare both methods
+View(day_score %>% add_column(day_score2$mean1,day_score2$mean2))
+
+
+##-------------------- Testing alternatives: Tidyverse -------------------------
+
+library(textdata)
+test <- mytokens %>%
+  inner_join(get_sentiments("loughran"), by = "word") %>%
+  group_by(datetimestamp) %>% count(sentiment)
+
+View(test)
+
+##----------------- Testing alternatives: SentimentAnalysis --------------------
+
+library(SentimentAnalysis)
+#https://cran.r-project.org/web/packages/SentimentAnalysis/SentimentAnalysis.pdf
+
+#calculates sentiment per document in corpus
+test2 <- analyzeSentiment(mycorpus, stemming = FALSE, aggregate = NULL, removeStopwords = FALSE)
+
+#sentiment polarity
+polarity <- ruleSentimentPolarity(dtm2, SentimentDictionaryBinary(DictionaryLM$positive,DictionaryLM$negative))
+
+# View summary statistics of sentiment variable
+summary(test2$SentimentLM)
+
+# Visualize distribution of standardized sentiment variable
+hist(scale(test2$SentimentLM))
+
+# apple news between 2020-01-10 until 2020-04-17
+datetime <- do.call(c, lapply(mycorpus, function(x) x$meta$datetimestamp))
+
+plotSentiment(test2$SentimentLM,x=datetime)
+plotSentiment(test2$SentimentLM, x=datetime, cumsum=TRUE)
+
+
+##---------------------visualize frequent terms--------------------
+
+##----------------------------bar chart---------------------------
+library(ggplot2)
+
+df <- subset(data.frame(term = mytokens_weights$word, weighted_freq = mytokens_weights$tf_idf_LM), mytokens_weights$tf_idf_LM>1.68)
+
+ggplot(df,aes(x = reorder(df$term, +df$weighted_freq), y = weighted_freq, fill=df$weighted_freq)) + geom_bar(stat = "identity") + 
+  scale_colour_gradientn(colors = terrain.colors(10)) + xlab("Terms") + ylab("Count") + coord_flip()
+#+ coord_flip() scale_x_continuous(labels = c(seq(1996, 2019, 5)), breaks = seq(1996, 2019, 5))
+
+##----------------------------word cloud---------------------------
+
+#load required libraries
+library(wordcloud)
+library(wordcloud2)
+
+#Bag of words figure
+df2 <- subset(data.frame(term = mytokens_weights$word, weighted_freq = mytokens_weights$tf),mytokens_weights$tf_idf>0.05)
+wordcloud2(df2, size=0.5, color = "random-dark", backgroundColor = "white")
+
+
+# CLEAN UP #################################################
+
+# Clear environment 
+rm(list = ls()) 
+
+# Clear packages 
+p_unload(all)  # Remove all add-ons
+
+# Clear console 
+cat("\014")  # ctrl+L
+
+# Clear mind :)

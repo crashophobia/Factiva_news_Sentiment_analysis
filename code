@@ -1,0 +1,301 @@
+rm(list=ls())
+#set work directory
+setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/Code")
+
+#####################################################################
+#									    			PREPARATION		    											#
+#####################################################################
+##------------------ Loughran-McDonald dictionary -------------------
+#DICTIONARY
+library(readr)
+library(readxl)
+
+#From: https://sraf.nd.edu/textual-analysis/
+#list of words to be excluded (Merged_Part1 is Generic, Auditor, Currencies, Geographic, Dates and Numbers)
+#Note: Part2 would be the names list which I'm not using
+
+StopWords_Merged_Part1 <- lapply(read.table("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/Code/StopWords_Merged_Part1.txt", quote="\"", comment.char=""), tolower)
+StopWords_Merged_Part1 <- unlist(lapply(StopWords_Merged_Part1, as.character)) 
+
+#https://sraf.nd.edu/textual-analysis/resources/
+#Read the Loughran-McDonald finance-specific dictionary
+library(tokenizers)
+
+negative_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Negative", col_names = FALSE), tolower)
+negative_words <- tokenize(negative_words[["...1"]])
+
+positive_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Positive", col_names = FALSE), tolower)
+positive_words <- tokenize(positive_words[["...1"]])
+
+uncertainty_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Uncertainty", col_names = FALSE), tolower)
+uncertainty_words <- tokenize(uncertainty_words[["...1"]])
+
+litigious_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Litigious", col_names = FALSE), tolower)
+litigious_words <- tokenize(litigious_words[["...1"]])
+
+strongmodal_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "StrongModal", col_names = FALSE), tolower)
+strongmodal_words <- tokenize(strongmodal_words[["...1"]])
+
+weakmodal_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "WeakModal", col_names = FALSE), tolower)
+weakmodal_words <- tokenize(weakmodal_words[["...1"]])
+
+constraining_words <- lapply(read_excel("LoughranMcDonald_SentimentWordLists_2018.xlsx", sheet = "Constraining", col_names = FALSE), tolower)
+constraining_words <- tokenize(constraining_words[["...1"]])
+
+##--------------------------- create the corpus ---------------------------
+library(tm) #text-mining
+library(R.temis) #Integrated Text Mining Solution
+library(tm.plugin.factiva)
+
+#GET THE DATA for company with ticker BAC
+setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/NEWS ARTICLES BY TICKER/BAC")
+source <- FactivaSource('BAC.html', encoding = "UTF-8",format="HTML")
+raw_corpus <- Corpus(source, readerControl = list(language="en")) 
+
+#Check how many documents there is in this file
+length(as.list(raw_corpus))
+
+##-------------------------- clean the corpus -------------------------
+#CLEAN THE DATA
+library(qdap)
+library(stringi)
+
+#Removing URLs (tranforming it to a space)
+removeURL <- content_transformer(function(x) gsub("(f|ht)tp(s?)://\\S+", " ", x, perl=T))
+corpus <- tm_map(raw_corpus, removeURL)
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+corpus <- tm_map(corpus, toSpace, "/")
+corpus <- tm_map(corpus, toSpace, "@")
+corpus <- tm_map(corpus, toSpace, "\\|")
+corpus <- tm_map(corpus, toSpace, "-") #splits hyphenated words
+corpus <- tm_map(corpus, toSpace, "—") #splits hyphenated words (different hyphen)
+corpus <- tm_map(corpus, toSpace, "‘")
+corpus <- tm_map(corpus, toSpace, "…")
+corpus <- tm_map(corpus, toSpace, "–")
+corpus <- tm_map(corpus, toSpace, "’")
+corpus <- tm_map(corpus, toSpace, "“")
+corpus <- tm_map(corpus, toSpace, "”")
+
+#convert to lower case
+corpus <- tm_map(corpus, content_transformer(function(x) stri_trans_tolower(x)))
+
+# remove basic english stopwords
+corpus <- tm_map(corpus, removeWords, stopwords("en")) 
+
+#Remove pontuation, numbers, LM stopwords and extra white spaces
+skipWords <- function(x) removeWords(x, StopWords_Merged_Part1) #c(StopWords, "insert other words if needed")
+
+funs <- list(stripWhitespace,
+             skipWords,
+             removeNumbers,
+             removePunctuation)
+
+#tm_reduce - Fold multiple transformations (mappings) into a single one, from right to left.
+clean_corpus <- tm_map(corpus, FUN = tm_reduce, tmFuns = funs)
+
+#save for later use
+setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/NEWS ARTICLES BY TICKER/BAC")
+BAC <- clean_corpus
+save(BAC, file="BAC.rda")
+
+###################################################################
+#					  	            	TOKENIZATION    	    			  				#
+###################################################################
+library(purrr)
+library(dplyr)
+library(tidytext)
+library(tidyr)
+
+#Tidy a Corpus object from the tm package: Returns a data frame with one-row-per-document
+tidy_corpus <- tidy(clean_corpus, collapse = " ") 
+
+#Tokenize my tidy_corpus
+mytokens <- tidy_corpus %>%
+  unnest_tokens(word, text)
+
+##--------------------- Term weighting --------------------
+
+#Loughran-McDonald - tf-idf with a modification that adjusts for document length
+mybind_tf_idf <- function(tbl, term, document, n) {
+  term <- quo_name(enquo(term))
+  document <- quo_name(enquo(document))
+  n_col <- quo_name(enquo(n))
+  
+  terms <- as.character(tbl[[term]])
+  documents <- as.character(tbl[[document]])
+  n <- tbl[[n_col]]
+  doc_totals <- tapply(n, documents, sum)
+  idf <- log(length(doc_totals) / table(terms))
+  
+  tbl$tf <- (1+log(n))
+  tbl$idf <- as.numeric(idf[terms])
+  tbl$tf_idf <- tbl$tf * tbl$idf
+  tbl$tf_idf_LM <- ((1+log(n))/(1+log(as.numeric(doc_totals[documents])))) * tbl$idf
+  
+  if(any(tbl$idf < 0, na.rm = TRUE)) {
+    rlang::warn(paste("A value for tf_idf is negative:\n",
+                      "Input should have exactly one row per document-term combination."))
+  }
+  tbl
+}
+
+mytokens_weights <- mytokens %>% count(datetimestamp, id, word) %>% mybind_tf_idf(word, id, n)
+
+###################################################################
+#					  	        	SENTIMENT	ANALYSIS   	    			  				#
+###################################################################
+
+#Creating sentiment dummies
+negative <- 0
+positive <- 0
+uncertainty <- 0
+litigious <- 0
+strongmodal <- 0
+weakmodal <- 0
+constraining <- 0
+
+for (i in (1:length(mytokens_weights[["word"]]))){
+  negative[i] <- 0
+  positive[i] <- 0
+  uncertainty[i] <- 0
+  litigious[i] <- 0
+  strongmodal[i] <- 0
+  weakmodal[i] <- 0
+  constraining[i] <- 0
+  if (is.na(charmatch(mytokens_weights[["word"]][i], negative_words)) == FALSE){
+    negative[i] <- negative[i] + 1
+    } else if (is.na(charmatch(mytokens_weights[["word"]][i], positive_words)) == FALSE){
+      positive[i] <- positive[i] + 1
+      } else if (is.na(charmatch(mytokens_weights[["word"]][i], uncertainty_words)) == FALSE){
+        uncertainty[i] <- uncertainty[i] + 1
+        } else if (is.na(charmatch(mytokens_weights[["word"]][i], litigious_words)) == FALSE){
+          litigious[i] <- litigious[i] + 1
+          } else if (is.na(charmatch(mytokens_weights[["word"]][i], strongmodal_words)) == FALSE){
+            strongmodal[i] <- strongmodal[i] + 1
+            } else if (is.na(charmatch(mytokens_weights[["word"]][i], weakmodal_words)) == FALSE){
+              weakmodal[i] <- weakmodal[i] + 1
+              } else if (is.na(charmatch(mytokens_weights[["word"]][i], constraining_words)) == FALSE){
+                constraining[i] <- constraining[i] + 1
+              } else {next}
+}
+
+library(tibble)
+mytokens_weights <- mytokens_weights %>% add_column(tibble(negative),tibble(positive), tibble(uncertainty), tibble(litigious),tibble(strongmodal),tibble(weakmodal),tibble(constraining))
+
+BAC <- data.frame("Firm"="BAC","Date" = mytokens_weights$datetimestamp, "Document" = mytokens_weights$id, "Word" = mytokens_weights$word,
+                "n" = mytokens_weights$n, "tf" = mytokens_weights$tf, "idf" = mytokens_weights$idf,"tf-idf" = mytokens_weights$tf_idf,
+                "tf-idf-LM" = mytokens_weights$tf_idf_LM, "is.negative" = mytokens_weights$`tibble(negative)`, "is.positive" = mytokens_weights$`tibble(positive)`,
+                "is.uncertain" = mytokens_weights$`tibble(uncertainty)`,"is.litigious"=mytokens_weights$`tibble(litigious)`,
+                "is.strongmodal"=mytokens_weights$`tibble(strongmodal)`, "is.weakmodal"= mytokens_weights$`tibble(weakmodal)`, 
+                "is.constraining"=mytokens_weights$`tibble(constraining)`, stringsAsFactors = FALSE)
+
+#Export the data
+setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/Code/Corpus")
+library(writexl)
+write_xlsx(BAC, "BAC.xlsx") 
+
+
+##-------------------- count words and compute sentiment score per article --------------------
+groups_byarticle <- (mytokens_weights %>% group_by(id)) #Create groups by article
+View(group_keys(groups_byarticle)) #Check the grouping structure
+
+mytokens_byarticle_weights <- group_split(groups_byarticle) #Split data by article
+
+#initiate variables
+n_negative <- 0
+n_positive <- 0
+n_uncertainty <- 0
+n_litigious <- 0
+n_strongmodal <- 0
+n_weakmodal <- 0
+n_constraining <- 0
+sentiment_score_byarticle <- 0 #(pos-neg)/(pos+neg)
+n_negative2 <- 0
+n_positive2 <- 0
+n_uncertainty2 <- 0
+n_litigious2 <- 0
+n_strongmodal2 <- 0
+n_weakmodal2 <- 0
+n_constraining2 <- 0
+sentiment_score_byarticle2 <- 0 #(pos-neg)/(pos+neg)
+
+for (i in 1:length(mytokens_byarticle_weights)){
+  n_negative[i] <- 0
+  n_positive[i] <- 0
+  n_uncertainty[i] <- 0
+  n_litigious[i] <- 0
+  n_strongmodal[i] <- 0
+  n_weakmodal[i] <- 0
+  n_constraining[i] <- 0
+  sentiment_score_byarticle[i] <- 0 #(pos-neg)/(pos+neg)
+  n_negative2[i] <- 0
+  n_positive2[i] <- 0
+  n_uncertainty2[i] <- 0
+  n_litigious2[i] <- 0
+  n_strongmodal2[i] <- 0
+  n_weakmodal2[i] <- 0
+  n_constraining2[i] <- 0
+  sentiment_score_byarticle2[i] <- 0 #(pos-neg)/(pos+neg)
+  
+  for (j in 1:length(mytokens_byarticle_weights[[i]][["word"]])){
+    if (mytokens_byarticle_weights[[i]][["tibble(negative)"]][["negative"]][j] == 1){
+      n_negative[i] <- n_negative[i] + mytokens_byarticle_weights[[i]][["n"]][j]
+      n_negative2[i] <- n_negative2[i] + mytokens_byarticle_weights[[i]][["tf_idf_LM"]][j] #weighted
+      } else if (mytokens_byarticle_weights[[i]][["tibble(positive)"]][["positive"]][j] == 1){
+        n_positive[i] <- n_positive[i] + mytokens_byarticle_weights[[i]][["n"]][j]
+        n_positive2[i] <- n_positive2[i] + mytokens_byarticle_weights[[i]][["tf_idf_LM"]][j]
+        } else if (mytokens_byarticle_weights[[i]][["tibble(uncertainty)"]][["uncertainty"]][j] == 1){
+          n_uncertainty[i] <- n_uncertainty[i] + mytokens_byarticle_weights[[i]][["n"]][j]
+          n_uncertainty2[i] <- n_uncertainty2[i] + mytokens_byarticle_weights[[i]][["tf_idf_LM"]][j]
+          } else if (mytokens_byarticle_weights[[i]][["tibble(litigious)"]][["litigious"]][j] == 1){
+            n_litigious[i] <- n_litigious[i] + mytokens_byarticle_weights[[i]][["n"]][j]
+            n_litigious2[i] <- n_litigious2[i] + mytokens_byarticle_weights[[i]][["tf_idf_LM"]][j]
+            } else if (mytokens_byarticle_weights[[i]][["tibble(strongmodal)"]][["strongmodal"]][j] == 1){
+              n_strongmodal[i] <- n_strongmodal[i] + mytokens_byarticle_weights[[i]][["n"]][j]
+              n_strongmodal2[i] <- n_strongmodal2[i] + mytokens_byarticle_weights[[i]][["tf_idf_LM"]][j]
+              } else if (mytokens_byarticle_weights[[i]][["tibble(weakmodal)"]][["weakmodal"]][j] == 1){
+                n_weakmodal[i] <- n_weakmodal[i] + mytokens_byarticle_weights[[i]][["n"]][j]
+                n_weakmodal2[i] <- n_weakmodal2[i] + mytokens_byarticle_weights[[i]][["tf_idf_LM"]][j]
+                } else if (mytokens_byarticle_weights[[i]][["tibble(constraining)"]][["constraining"]][j] == 1){
+                  n_constraining[i] <- n_constraining[i] + mytokens_byarticle_weights[[i]][["n"]][j]
+                  n_constraining2[i] <- n_constraining2[i] + mytokens_byarticle_weights[[i]][["tf_idf_LM"]][j]
+                }
+  }
+
+  sentiment_score_byarticle[i] = (n_positive[i] - n_negative[i]) / (n_positive[i] + n_negative[i])
+  sentiment_score_byarticle2[i] = (n_positive2[i] - n_negative2[i]) / (n_positive2[i] + n_negative2[i])
+  
+}
+
+sentiment <- mytokens %>% count(datetimestamp,id) %>% add_column(tibble(n_negative),tibble(n_positive), tibble(n_uncertainty), 
+        tibble(n_litigious),tibble(n_strongmodal),tibble(n_weakmodal),tibble(n_constraining),tibble(sentiment_score_byarticle),
+        tibble(n_negative2),tibble(n_positive2), tibble(n_uncertainty2),tibble(n_litigious2),tibble(n_strongmodal2),tibble(n_weakmodal2),
+        tibble(n_constraining2),tibble(sentiment_score_byarticle2))
+
+BAC <- data.frame("Firm"="BAC","Date" = sentiment$datetimestamp, "Document" = sentiment$id,"#positive" = sentiment$`tibble(n_positive)`,
+                    "#negative" = sentiment$`tibble(n_negative)`, "sentiment score" = sentiment$`tibble(sentiment_score_byarticle)`,
+                 "#positive weighted"=sentiment$`tibble(n_positive2)`,"#negative weighted"=sentiment$`tibble(n_negative2)`, "sentiment score weighted" = sentiment$`tibble(sentiment_score_byarticle2)`,
+                 "#uncertainty" = sentiment$`tibble(n_uncertainty)`, "#uncertainty weighted" = sentiment$`tibble(n_uncertainty2)`,
+                 "#litigious" = sentiment$`tibble(n_litigious)`, "#litigious weighted"=sentiment$`tibble(n_litigious2)`, 
+                 "#strongmodal"=sentiment$`tibble(n_strongmodal)`,"#strongmodal weighted"=sentiment$`tibble(n_strongmodal2)`,
+                 "#weakmodal"=sentiment$`tibble(n_weakmodal)`,"#weakmodal weighted"=sentiment$`tibble(n_weakmodal2)`, 
+                 "#constraining"=sentiment$`tibble(n_constraining)`,"#constraining weighted"=sentiment$`tibble(n_constraining2)`,stringsAsFactors = FALSE)
+
+View(sentiment_score_byarticle)
+
+setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/Code/Sentiment")
+write_xlsx(BAC, "BAC.xlsx") #Export the data
+
+
+# CLEAN UP #################################################
+
+# Clear environment 
+rm(list = ls()) 
+
+# Clear packages 
+p_unload(all)  # Remove all add-ons
+
+# Clear console 
+cat("\014")  # ctrl+L
+
+# Clear mind :)

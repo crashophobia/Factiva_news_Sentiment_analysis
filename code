@@ -3,7 +3,7 @@ rm(list=ls())
 setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/Code")
 
 #####################################################################
-#									    			PREPARATION		    											#
+#	                          PREPARATION                           	#
 #####################################################################
 ##------------------ Loughran-McDonald dictionary -------------------
 #DICTIONARY
@@ -52,7 +52,7 @@ setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/NEWS ARTICLES BY TICK
 source <- FactivaSource('BAC.html', encoding = "UTF-8",format="HTML")
 raw_corpus <- Corpus(source, readerControl = list(language="en")) 
 
-#Check how many documents there is in this file
+#Check how many documents there are in this file
 length(as.list(raw_corpus))
 
 ##-------------------------- clean the corpus -------------------------
@@ -99,12 +99,13 @@ BAC <- clean_corpus
 save(BAC, file="BAC.rda")
 
 ###################################################################
-#					  	            	TOKENIZATION    	    			  				#
+#                         TOKENIZATION                          #
 ###################################################################
 library(purrr)
 library(dplyr)
 library(tidytext)
 library(tidyr)
+library(writexl)
 
 #Tidy a Corpus object from the tm package: Returns a data frame with one-row-per-document
 tidy_corpus <- tidy(clean_corpus, collapse = " ") 
@@ -142,7 +143,7 @@ mybind_tf_idf <- function(tbl, term, document, n) {
 mytokens_weights <- mytokens %>% count(datetimestamp, id, word) %>% mybind_tf_idf(word, id, n)
 
 ###################################################################
-#					  	        	SENTIMENT	ANALYSIS   	    			  				#
+#                       SENTIMENT	ANALYSIS                        #
 ###################################################################
 
 #Creating sentiment dummies
@@ -182,7 +183,7 @@ for (i in (1:length(mytokens_weights[["word"]]))){
 library(tibble)
 mytokens_weights <- mytokens_weights %>% add_column(tibble(negative),tibble(positive), tibble(uncertainty), tibble(litigious),tibble(strongmodal),tibble(weakmodal),tibble(constraining))
 
-BAC <- data.frame("Firm"="BAC","Date" = mytokens_weights$datetimestamp, "Document" = mytokens_weights$id, "Word" = mytokens_weights$word,
+BAC_corpus <- data.frame("Firm"="BAC","Date" = (lubridate::date(mytokens_weights$datetimestamp)), "Document" = mytokens_weights$id, "Word" = mytokens_weights$word,
                 "n" = mytokens_weights$n, "tf" = mytokens_weights$tf, "idf" = mytokens_weights$idf,"tf-idf" = mytokens_weights$tf_idf,
                 "tf-idf-LM" = mytokens_weights$tf_idf_LM, "is.negative" = mytokens_weights$`tibble(negative)`, "is.positive" = mytokens_weights$`tibble(positive)`,
                 "is.uncertain" = mytokens_weights$`tibble(uncertainty)`,"is.litigious"=mytokens_weights$`tibble(litigious)`,
@@ -191,8 +192,7 @@ BAC <- data.frame("Firm"="BAC","Date" = mytokens_weights$datetimestamp, "Documen
 
 #Export the data
 setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/Code/Corpus")
-library(writexl)
-write_xlsx(BAC, "BAC.xlsx") 
+write_delim(BAC_corpus, "BAC_corpus.csv",col_names = TRUE,delim = ",")
 
 
 ##-------------------- count words and compute sentiment score per article --------------------
@@ -272,7 +272,7 @@ sentiment <- mytokens %>% count(datetimestamp,id) %>% add_column(tibble(n_negati
         tibble(n_negative2),tibble(n_positive2), tibble(n_uncertainty2),tibble(n_litigious2),tibble(n_strongmodal2),tibble(n_weakmodal2),
         tibble(n_constraining2),tibble(sentiment_score_byarticle2))
 
-BAC <- data.frame("Firm"="BAC","Date" = sentiment$datetimestamp, "Document" = sentiment$id,"#positive" = sentiment$`tibble(n_positive)`,
+BAC_sentiment <- data.frame("Firm"="BAC","Date" = (lubridate::date(sentiment$datetimestamp)), "Document" = sentiment$id,"#positive" = sentiment$`tibble(n_positive)`,
                     "#negative" = sentiment$`tibble(n_negative)`, "sentiment score" = sentiment$`tibble(sentiment_score_byarticle)`,
                  "#positive weighted"=sentiment$`tibble(n_positive2)`,"#negative weighted"=sentiment$`tibble(n_negative2)`, "sentiment score weighted" = sentiment$`tibble(sentiment_score_byarticle2)`,
                  "#uncertainty" = sentiment$`tibble(n_uncertainty)`, "#uncertainty weighted" = sentiment$`tibble(n_uncertainty2)`,
@@ -284,7 +284,7 @@ BAC <- data.frame("Firm"="BAC","Date" = sentiment$datetimestamp, "Document" = se
 View(sentiment_score_byarticle)
 
 setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/Code/Sentiment")
-write_xlsx(BAC, "BAC.xlsx") #Export the data
+write_delim(BAC_sentiment, "BAC_sentiment.csv",col_names = TRUE,delim = ",") #Export the data
 
 
 # CLEAN UP #################################################

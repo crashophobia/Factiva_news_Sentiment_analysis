@@ -3,7 +3,7 @@ rm(list=ls())
 setwd("C:/Users/Utilizador/Desktop/Thesis/TEXTUAL ANALYSIS/Code")
 
 #####################################################################
-#	                          PREPARATION                           	#
+#                            PREPARATION                           #
 #####################################################################
 ##------------------ Loughran-McDonald dictionary -------------------
 #DICTIONARY
@@ -99,7 +99,7 @@ BAC <- clean_corpus
 save(BAC, file="BAC.rda")
 
 ###################################################################
-#                         TOKENIZATION                          #
+#                          TOKENIZATION                          #
 ###################################################################
 library(purrr)
 library(dplyr)
@@ -143,7 +143,7 @@ mybind_tf_idf <- function(tbl, term, document, n) {
 mytokens_weights <- mytokens %>% count(datetimestamp, id, word) %>% mybind_tf_idf(word, id, n)
 
 ###################################################################
-#                       SENTIMENT	ANALYSIS                        #
+#                       SENTIMENT ANALYSIS                        #
 ###################################################################
 
 #Creating sentiment dummies

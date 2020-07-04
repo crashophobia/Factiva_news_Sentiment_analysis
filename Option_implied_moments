@@ -1,13 +1,9 @@
 #####################################################################
-#                       OPTIONS IMPLIED MOMENTS											#
+#                       OPTIONS IMPLIED MOMENTS                     #
 #####################################################################
 rm(list=ls())
 #set work directory
 setwd("C:/Users/Utilizador/Desktop/Thesis/OPTION IMPLIED MOMENTS/Code")
-
-#####################################################################
-#                             PREPARATION                           #
-#####################################################################
 
 #Interpolating a risk-free per maturity using the OptionMetrics zero coupon yield
 library(readxl)
@@ -28,3 +24,37 @@ for(i in (1:length(r$Date))){
 
 library(writexl)
 write_xlsx(rf, "rf.xlsx") #export the rf data
+
+##------------------ The trapezoidal method -------------------
+library(tidyr)
+library(purrr)
+library(dplyr)
+library(ragtop) # option pricing
+
+setwd("C:/Users/Utilizador/Desktop/Thesis/OPTION IMPLIED MOMENTS")
+data2 <- read.csv("AXP_test2.csv", header=TRUE)
+data <- data2 %>% dplyr::group_by(date, days, cp_flag) %>% nest() #form group by day, maturity and type (call/put)
+
+grid_data <- 0
+for(i in (1:length(data$date))){
+  #Ordering by lowest strike price to highest
+  k <- data[[4]][[i]]$impl_strike
+  sk <- order(k)
+  vol <- data[[4]][[i]]$impl_volatility
+  k <- k[sk]; vol <- vol[sk]
+  
+  # Create the grid of strike prices needed for the trapezoid approximation
+  grid <- approx(x=k, y=vol, method = "linear", n = 1001, ties = "ordered")
+  
+  ## input
+  S = data[[4]][[i]]$prc[1]
+  K   = grid$x
+  rf  = data[[4]][[i]]$rf[1]
+  vol = grid$y
+  Ty  = data[[2]][[i]]/360
+  if ((data[[3]][[i]])=="C"){callput = 1} else if ((data[[3]][[i]])=="P"){callput = -1}
+  
+  ##Apply the BS formula
+  bs <- blackscholes(callput, S, K, rf, Ty, vol)
+  test <- rbind(grid_data, data.frame(date=data$date[i],days=data$days[i],k=grid$x,price=bs$Price,vol=grid$y,Spot_price=S,risk_free=rf)) #add column
+  }

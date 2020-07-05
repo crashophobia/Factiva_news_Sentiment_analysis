@@ -5,26 +5,6 @@ rm(list=ls())
 #set work directory
 setwd("C:/Users/Utilizador/Desktop/Thesis/OPTION IMPLIED MOMENTS/Code")
 
-#Interpolating a risk-free per maturity using the OptionMetrics zero coupon yield
-library(readxl)
-zero_coupon_yield <- read_excel("C:/Users/Utilizador/Desktop/Thesis/OPTION IMPLIED MOMENTS/Zero coupon yield.xlsx", col_names = TRUE)
-r <- zero_coupon_yield %>% dplyr::group_by(Date) %>% nest() #form group by day
-
-tau <- c(10,30,60,91,122,152,182,273,365,547,730) #maturities from volatility surface
-rf <- data.frame(date=rep(r$Date,each=11),days=rep(tau),rf=0)
-
-beg <- -10
-end <- 0
-for(i in (1:length(r$Date))){
-    instrumental <- approx(x=r[[2]][[i]]$Days, y=r[[2]][[i]]$`Continuously Compounded Zero-Coupon Interest Rate`, xout=tau,rule=2, method = "linear", ties = "ordered")
-    beg <- beg+11
-    end <- end+11
-    rf$rf[beg:end] <- instrumental$y 
-}
-
-library(writexl)
-write_xlsx(rf, "rf.xlsx") #export the rf data
-
 ##------------------ The trapezoidal method -------------------
 library(tidyr)
 library(purrr)

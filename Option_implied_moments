@@ -11,9 +11,9 @@ library(readxl)
 library(readr)
 library(writexl)
 
-##------------------ Example: Firm=AXP, Maturity = 91 days -------------------
+##------------------ Example: Firm=AXP, Maturity = 60 days -------------------
 setwd("C:/Users/Utilizador/Desktop/Thesis/OPTION IMPLIED MOMENTS/Data for moments")
-data2 <- read.csv("AXP_91_data.csv", header=TRUE)
+data2 <- read.csv("AXP_60_data.csv", header=TRUE)
 data <- data2 %>% dplyr::group_by(date, cp_flag) %>% nest() #form group by day and type (call/put)
 #save(data, file="data.rda")
 
@@ -140,7 +140,7 @@ for(i in seg){
   
 }
 
-AXP_91_moments <- moments
+AXP_60_moments <- moments
 setwd("C:/Users/Utilizador/Desktop/Thesis/OPTION IMPLIED MOMENTS/Implied Moments")
-save(AXP_91_moments, file="AXP_91_moments.rda")
-write_delim(AXP_91_moments, "AXP_91_moments.csv",col_names = TRUE,delim = ",") #export the moments data
+save(AXP_60_moments, file="AXP_60_moments.rda")
+write_delim(AXP_60_moments, "AXP_60_moments.csv",col_names = TRUE,delim = ",") #export the moments data
